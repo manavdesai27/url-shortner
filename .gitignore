@@ -30,3 +30,6 @@ dump.rdb
 
 # Env files
 .env
+
+# VSCode
+.vscode/

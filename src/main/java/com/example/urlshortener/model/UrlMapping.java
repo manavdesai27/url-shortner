@@ -2,6 +2,7 @@ package com.example.urlshortener.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import com.example.urlshortener.model.User;
 
 @Entity
 public class UrlMapping {
@@ -20,6 +21,11 @@ public class UrlMapping {
     private int clickCount = 0;
 
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    // JoinColumn means this entity has a foreign key column named "user_id"
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
     // Constructors, getters, setters
     public UrlMapping() {}
@@ -49,6 +55,14 @@ public class UrlMapping {
 
     public void setClickCount(int clickCount) {
         this.clickCount = clickCount;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    public void setUser(User user) {
+        this.user = user;
     }
 
 }

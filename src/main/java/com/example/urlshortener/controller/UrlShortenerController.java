@@ -7,6 +7,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.Map;
+import com.example.urlshortener.model.User;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/")
@@ -16,8 +19,11 @@ public class UrlShortenerController {
     private UrlShortenerService service;
 
     @PostMapping("/shorten")
-    public ResponseEntity<String> shortenUrl(@RequestBody String originalUrl) {
-        String shortCode = service.shortenUrl(originalUrl);
+    public ResponseEntity<String> shortenUrl(@RequestBody Map<String, String> body,
+                                             @AuthenticationPrincipal User user) {
+        String originalUrl = body.get("originalUrl");
+        System.out.println("Original URL: " + originalUrl);
+        String shortCode = service.shortenUrl(originalUrl, user);
         return ResponseEntity.ok(shortCode);
     }
 
@@ -33,13 +39,14 @@ public class UrlShortenerController {
         }
     }
     @GetMapping("/analytics/{shortCode}")
-    public ResponseEntity<?> getClickCount(@PathVariable String shortCode) {
-        Integer clickCount = service.getClickCount(shortCode);
+    public ResponseEntity<?> getClickCount(@PathVariable String shortCode,
+                                           @AuthenticationPrincipal User user) {
+        Integer clickCount = service.getClickCountIfOwner(shortCode, user);
 
         if (clickCount != null) {
             return ResponseEntity.ok().body(clickCount);  // Directly return the click count value
         } else {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Short URL not found");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Short URL not found or not yours");
         }
     }
 }

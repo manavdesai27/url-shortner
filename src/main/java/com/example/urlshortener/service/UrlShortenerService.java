@@ -21,8 +21,7 @@ public class UrlShortenerService {
     @Autowired
     private StringRedisTemplate redis;
 
-
-    public String shortenUrl(String originalUrl) {
+    public String shortenUrl(String originalUrl, com.example.urlshortener.model.User user) {
         if (originalUrl == null || originalUrl.isBlank()) {
             throw new InvalidUrlException("URL cannot be empty");
         }
@@ -33,9 +32,12 @@ public class UrlShortenerService {
 
         UrlMapping mapping = new UrlMapping();
         mapping.setOriginalUrl(originalUrl);
+        mapping.setUser(user);
+        System.out.println("Saving original URL: " + mapping);
         mapping = urlRepo.save(mapping);
 
         String shortCode = Base62Encoder.encode(mapping.getId());
+        System.out.println("Generated short code: " + shortCode);
         mapping.setShortCode(shortCode);
         urlRepo.save(mapping);
 
@@ -80,6 +82,7 @@ public class UrlShortenerService {
                 })
                 .orElseThrow(() -> new UrlNotFoundException("Short URL not found"));
     }
+
     public Integer getClickCount(String shortCode) {
         // Try to get the click count from Redis cache first
         String clickCountFromCache = redis.opsForValue().get(shortCode + ":clickCount");
@@ -106,6 +109,15 @@ public class UrlShortenerService {
         }
     }
 
+    public Integer getClickCountIfOwner(String shortCode, com.example.urlshortener.model.User user) {
+        Optional<UrlMapping> urlMappingOpt = urlRepo.findByShortCode(shortCode);
 
-
+        if (urlMappingOpt.isPresent()) {
+            UrlMapping urlMapping = urlMappingOpt.get();
+            if (urlMapping.getUser() != null && urlMapping.getUser().getId().equals(user.getId())) {
+                return urlMapping.getClickCount();
+            }
+        }
+        return null;
+    }
 }
