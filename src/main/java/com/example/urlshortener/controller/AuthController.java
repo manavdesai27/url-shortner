@@ -1,10 +1,8 @@
 package com.example.urlshortener.controller;
 
-import com.example.urlshortener.model.User;
 import com.example.urlshortener.service.UserService;
 import com.example.urlshortener.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpCookie;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;

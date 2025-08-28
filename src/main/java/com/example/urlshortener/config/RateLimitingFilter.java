@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Refill;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -24,10 +23,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final Map<String, Bucket> shortenBuckets = new ConcurrentHashMap<>();
     private final Map<String, Bucket> redirectBuckets = new ConcurrentHashMap<>();
 
-    private final Bandwidth loginLimit = Bandwidth.classic(10, Refill.greedy(10, Duration.ofMinutes(1)));
-    private final Bandwidth registerLimit = Bandwidth.classic(5, Refill.greedy(5, Duration.ofMinutes(1)));
-    private final Bandwidth shortenLimit = Bandwidth.classic(20, Refill.greedy(20, Duration.ofMinutes(1)));
-    private final Bandwidth redirectLimit = Bandwidth.classic(100, Refill.greedy(100, Duration.ofMinutes(1)));
+    private final Bandwidth loginLimit = Bandwidth.builder()
+            .capacity(10)
+            .refillIntervally(10, Duration.ofMinutes(1))
+            .build();
+    private final Bandwidth registerLimit = Bandwidth.builder()
+            .capacity(5)
+            .refillIntervally(5, Duration.ofMinutes(1))
+            .build();
+    private final Bandwidth shortenLimit = Bandwidth.builder()
+            .capacity(20)
+            .refillIntervally(20, Duration.ofMinutes(1))
+            .build();
+    private final Bandwidth redirectLimit = Bandwidth.builder()
+            .capacity(100)
+            .refillIntervally(100, Duration.ofMinutes(1))
+            .build();
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {

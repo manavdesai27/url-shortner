@@ -1,8 +1,6 @@
 package com.example.urlshortener.model;
 
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
-import com.example.urlshortener.model.User;
 
 @Entity
 public class UrlMapping {
@@ -19,8 +17,6 @@ public class UrlMapping {
 
     @Column(name = "click_count")
     private int clickCount = 0;
-
-    private LocalDateTime createdAt = LocalDateTime.now();
 
     // JoinColumn means this entity has a foreign key column named "user_id"
     @ManyToOne(fetch = FetchType.LAZY)

@@ -3,7 +3,6 @@ package com.example.urlshortener.config;
 import com.example.urlshortener.util.JwtUtil;
 import com.example.urlshortener.service.UserService;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
-import com.example.urlshortener.config.RateLimitingFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -49,15 +48,16 @@ public class SecurityConfig {
         http.addFilterBefore(new JwtAuthFilter(jwtUtil, userService), UsernamePasswordAuthenticationFilter.class);
 
         http
-          .csrf().disable()
-          .authorizeHttpRequests(authz -> authz
-            .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
-            .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
-            .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
-            .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
-            .requestMatchers(HttpMethod.POST, "/shorten").authenticated()
-            .anyRequest().authenticated()
-          );
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(authz -> authz
+                                .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
+                                .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
+                                .requestMatchers(HttpMethod.POST, "/shorten").authenticated()
+                                .anyRequest()
+                                .authenticated()
+                );
 
         return http.build();
     }
