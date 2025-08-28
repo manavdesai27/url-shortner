@@ -98,7 +98,7 @@ public class UrlShortenerService {
                 UrlMapping urlMapping = urlMappingOpt.get();
 
                 // Store the click count in cache for future use (TTL can be added if needed)
-                redis.opsForValue().set(shortCode + ":clickCount", String.valueOf(urlMapping.getClickCount()));
+                redis.opsForValue().set(shortCode + ":clickCount", String.valueOf(urlMapping.getClickCount()), 1,  TimeUnit.HOURS);
 
                 // Return the click count from database
                 return urlMapping.getClickCount();
@@ -115,7 +115,8 @@ public class UrlShortenerService {
         if (urlMappingOpt.isPresent()) {
             UrlMapping urlMapping = urlMappingOpt.get();
             if (urlMapping.getUser() != null && urlMapping.getUser().getId().equals(user.getId())) {
-                return urlMapping.getClickCount();
+                // Delegate to caching version
+                return getClickCount(shortCode);
             }
         }
         return null;
