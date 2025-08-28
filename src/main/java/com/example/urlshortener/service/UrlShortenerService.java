@@ -30,19 +30,42 @@ public class UrlShortenerService {
             throw new InvalidUrlException("Invalid URL format");
         }
 
+        String cacheKey = String.format("url:%d:%s", user.getId(), originalUrl);
+
+        // Try Redis cache for deduplication
+        String cachedShortCode = redis.opsForValue().get(cacheKey);
+        if (cachedShortCode != null && !cachedShortCode.isBlank()) {
+            return cachedShortCode;
+        }
+
+        // Check DB for existing mapping
+        Optional<UrlMapping> existing = urlRepo.findByOriginalUrlAndUser(originalUrl, user);
+        if (existing.isPresent() && existing.get().getShortCode() != null) {
+            String shortCode = existing.get().getShortCode();
+            // Write to Redis for future optimization
+            try {
+                redis.opsForValue().set(cacheKey, shortCode, 1, TimeUnit.HOURS);
+                redis.opsForValue().set(shortCode, originalUrl, 1, TimeUnit.HOURS);
+            } catch (Exception e) {
+                System.err.println("Redis error: " + e.getMessage());
+            }
+            return shortCode;
+        }
+
+        // Otherwise, create a new mapping
         UrlMapping mapping = new UrlMapping();
         mapping.setOriginalUrl(originalUrl);
         mapping.setUser(user);
-        System.out.println("Saving original URL: " + mapping);
         mapping = urlRepo.save(mapping);
 
         String shortCode = Base62Encoder.encode(mapping.getId());
-        System.out.println("Generated short code: " + shortCode);
         mapping.setShortCode(shortCode);
         urlRepo.save(mapping);
 
+        // Cache both lookup and reverse for future
         try {
             redis.opsForValue().set(shortCode, originalUrl, 1, TimeUnit.HOURS);
+            redis.opsForValue().set(cacheKey, shortCode, 1, TimeUnit.HOURS);
         } catch (Exception e) {
             System.err.println("Redis error: " + e.getMessage());
             // log warning but don’t fail the service
