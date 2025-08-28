@@ -2,6 +2,8 @@ package com.example.urlshortener.config;
 
 import com.example.urlshortener.util.JwtUtil;
 import com.example.urlshortener.service.UserService;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import com.example.urlshortener.config.RateLimitingFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,6 +34,13 @@ public class SecurityConfig {
     @Bean
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public FilterRegistrationBean<RateLimitingFilter> rateLimitingFilterRegistration(RateLimitingFilter filter) {
+        FilterRegistrationBean<RateLimitingFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setOrder(-101); // Ensure RateLimiter runs before SecurityFilterChain
+        return registration;
     }
 
     @Bean
