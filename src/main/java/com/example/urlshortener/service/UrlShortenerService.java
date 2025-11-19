@@ -3,17 +3,27 @@ package com.example.urlshortener.service;
 import com.example.urlshortener.exception.InvalidUrlException;
 import com.example.urlshortener.exception.UrlNotFoundException;
 import com.example.urlshortener.model.UrlMapping;
+import com.example.urlshortener.model.User;
 import com.example.urlshortener.repository.UrlMappingRepository;
-import com.example.urlshortener.util.Base62Encoder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @Service
 public class UrlShortenerService {
+
+    private static final Logger log = LoggerFactory.getLogger(UrlShortenerService.class);
+
+    private static final long DEFAULT_CACHE_TTL_SECONDS = 3600; // 1 hour
 
     @Autowired
     private UrlMappingRepository urlRepo;
@@ -21,57 +31,82 @@ public class UrlShortenerService {
     @Autowired
     private StringRedisTemplate redis;
 
-    public String shortenUrl(String originalUrl, com.example.urlshortener.model.User user) {
+    // Backward-compatible entrypoint (no expiration)
+    public String shortenUrl(String originalUrl, User user) {
+        return shortenUrl(originalUrl, user, null);
+    }
+
+    // New entrypoint with optional expiration (seconds from now)
+    @Transactional
+    public String shortenUrl(String originalUrl, User user, Long expiresInSeconds) {
         if (originalUrl == null || originalUrl.isBlank()) {
             throw new InvalidUrlException("URL cannot be empty");
         }
-
         if (!isValidUrl(originalUrl)) {
             throw new InvalidUrlException("Invalid URL format");
         }
 
+        // Check cache for dedup (per user+url). Cache TTL is aligned with expiration, so stale returns should be rare.
         String cacheKey = String.format("url:%d:%s", user.getId(), originalUrl);
-
-        // Try Redis cache for deduplication
-        String cachedShortCode = redis.opsForValue().get(cacheKey);
-        if (cachedShortCode != null && !cachedShortCode.isBlank()) {
-            return cachedShortCode;
-        }
-
-        // Check DB for existing mapping
-        Optional<UrlMapping> existing = urlRepo.findByOriginalUrlAndUser(originalUrl, user);
-        if (existing.isPresent() && existing.get().getShortCode() != null) {
-            String shortCode = existing.get().getShortCode();
-            // Write to Redis for future optimization
-            try {
-                redis.opsForValue().set(cacheKey, shortCode, 1, TimeUnit.HOURS);
-                redis.opsForValue().set(shortCode, originalUrl, 1, TimeUnit.HOURS);
-            } catch (Exception e) {
-                System.err.println("Redis error: " + e.getMessage());
+        try {
+            log.info("CACHE GET key={}", cacheKey);
+            String cachedShortCode = redis.opsForValue().get(cacheKey);
+            if (cachedShortCode != null && !cachedShortCode.isBlank()) {
+                log.info("CACHE HIT key={} valuePresent=true", cacheKey);
+                return cachedShortCode;
+            } else {
+                log.info("CACHE MISS key={}", cacheKey);
             }
-            return shortCode;
+        } catch (Exception e) {
+            log.warn("CACHE GET error key={} ex={}", cacheKey, e.toString());
         }
 
-        // Otherwise, create a new mapping
+        // Check DB for existing active mapping (non-expired)
+        Optional<UrlMapping> existing = urlRepo.findActiveByOriginalUrlAndUser(originalUrl, user);
+        if (existing.isPresent() && existing.get().getShortCode() != null) {
+            UrlMapping m = existing.get();
+            // Write to Redis for future optimization with TTL aligned to expiration
+            try {
+                long ttl = cacheTtlSeconds(m.getExpiresAt());
+                redis.opsForValue().set(cacheKey, m.getShortCode(), ttl, TimeUnit.SECONDS);
+                log.info("CACHE SET key={} ttlSec={}", cacheKey, ttl);
+                redis.opsForValue().set(m.getShortCode(), m.getOriginalUrl(), ttl, TimeUnit.SECONDS);
+                log.info("CACHE SET key={} ttlSec={}", m.getShortCode(), ttl);
+            } catch (Exception e) {
+                log.warn("CACHE SET error for keys=[{},{}] ex={}", cacheKey, m.getShortCode(), e.toString());
+            }
+            return m.getShortCode();
+        }
+
+        // Otherwise create new mapping (single INSERT via SEQUENCE + @PrePersist for shortCode)
         UrlMapping mapping = new UrlMapping();
         mapping.setOriginalUrl(originalUrl);
         mapping.setUser(user);
-        mapping = urlRepo.save(mapping);
-
-        String shortCode = Base62Encoder.encode(mapping.getId());
-        mapping.setShortCode(shortCode);
-        urlRepo.save(mapping);
-
-        // Cache both lookup and reverse for future
-        try {
-            redis.opsForValue().set(shortCode, originalUrl, 1, TimeUnit.HOURS);
-            redis.opsForValue().set(cacheKey, shortCode, 1, TimeUnit.HOURS);
-        } catch (Exception e) {
-            System.err.println("Redis error: " + e.getMessage());
-            // log warning but don’t fail the service
+        if (expiresInSeconds != null && expiresInSeconds > 0) {
+            mapping.setExpiresAt(Instant.now().plusSeconds(expiresInSeconds));
         }
 
-        return shortCode;
+        try {
+            mapping = urlRepo.save(mapping); // shortCode set by @PrePersist based on id
+        } catch (DataIntegrityViolationException ex) {
+            // Race: another request inserted the same (user, originalUrl) mapping
+            Optional<UrlMapping> race = urlRepo.findActiveByOriginalUrlAndUser(originalUrl, user);
+            if (race.isPresent()) {
+                return race.get().getShortCode();
+            }
+            throw ex;
+        }
+
+        // Cache both lookup and reverse for future (TTL aligned to expiration)
+        try {
+            long ttl = cacheTtlSeconds(mapping.getExpiresAt());
+            if (ttl > 0) {
+                redis.opsForValue().set(mapping.getShortCode(), mapping.getOriginalUrl(), ttl, TimeUnit.SECONDS);
+                redis.opsForValue().set(cacheKey, mapping.getShortCode(), ttl, TimeUnit.SECONDS);
+            }
+        } catch (Exception ignored) {}
+
+        return mapping.getShortCode();
     }
 
     private boolean isValidUrl(String url) {
@@ -83,65 +118,111 @@ public class UrlShortenerService {
         }
     }
 
+    @Transactional
     public String getOriginalUrl(String shortCode) {
-        String fromCache = redis.opsForValue().get(shortCode);
+        // Read cache first for speed, but we still increment DB atomically
+        String fromCache = null;
+        try {
+            log.info("CACHE GET key={}", shortCode);
+            fromCache = redis.opsForValue().get(shortCode);
+            if (fromCache != null) {
+                log.info("CACHE HIT key={} valuePresent=true", shortCode);
+            } else {
+                log.info("CACHE MISS key={}", shortCode);
+            }
+        } catch (Exception e) {
+            log.warn("CACHE GET error key={} ex={}", shortCode, e.toString());
+        }
 
-        // ✅ Always update click count in the DB
-        urlRepo.findByShortCode(shortCode).ifPresent(url -> {
-            url.setClickCount(url.getClickCount() + 1);
-            urlRepo.save(url); // persist the updated count
-        });
+        // Atomically increment click count only if mapping is active
+        int updated = urlRepo.incrementClickCount(shortCode);
+        log.info("DB incrementClickCount shortCode={} updated={}", shortCode, updated);
+        if (updated == 0) {
+            throw new UrlNotFoundException("Short URL not found");
+        }
 
-        // ✅ If in cache, return directly
+        // Invalidate cached clickCount if present
+        try {
+            redis.delete(shortCode + ":clickCount");
+        } catch (Exception ignored) {}
+
         if (fromCache != null) {
             return fromCache;
         }
 
-        // ✅ Otherwise, get from DB, cache it, and return
-        return urlRepo.findByShortCode(shortCode)
-                .map(url -> {
-                    redis.opsForValue().set(shortCode, url.getOriginalUrl(), 1, TimeUnit.HOURS);
-                    return url.getOriginalUrl();
-                })
+        // Cache miss: load from DB with active check, cache with TTL aligned to expiration
+        UrlMapping mapping = urlRepo.findActiveByShortCode(shortCode)
                 .orElseThrow(() -> new UrlNotFoundException("Short URL not found"));
+
+        try {
+            long ttl = cacheTtlSeconds(mapping.getExpiresAt());
+            if (ttl > 0) {
+                redis.opsForValue().set(shortCode, mapping.getOriginalUrl(), ttl, TimeUnit.SECONDS);
+                log.info("CACHE SET key={} ttlSec={}", shortCode, ttl);
+            }
+        } catch (Exception e) {
+            log.warn("CACHE SET error key={} ex={}", shortCode, e.toString());
+        }
+
+        return mapping.getOriginalUrl();
     }
 
     public Integer getClickCount(String shortCode) {
         // Try to get the click count from Redis cache first
-        String clickCountFromCache = redis.opsForValue().get(shortCode + ":clickCount");
+        String clickCountFromCache = null;
+        String clickKey = shortCode + ":clickCount";
+        try {
+            log.info("CACHE GET key={}", clickKey);
+            clickCountFromCache = redis.opsForValue().get(clickKey);
+            if (clickCountFromCache != null) {
+                log.info("CACHE HIT key={} valuePresent=true", clickKey);
+            } else {
+                log.info("CACHE MISS key={}", clickKey);
+            }
+        } catch (Exception e) {
+            log.warn("CACHE GET error key={} ex={}", clickKey, e.toString());
+        }
 
         if (clickCountFromCache != null) {
-            // If cache hit, return the cached value (convert it to int)
             return Integer.parseInt(clickCountFromCache);
-        } else {
-            // If not in cache, fetch it from the database
-            Optional<UrlMapping> urlMappingOpt = urlRepo.findByShortCode(shortCode);
+        }
 
-            if (urlMappingOpt.isPresent()) {
-                UrlMapping urlMapping = urlMappingOpt.get();
-
-                // Store the click count in cache for future use (TTL can be added if needed)
-                redis.opsForValue().set(shortCode + ":clickCount", String.valueOf(urlMapping.getClickCount()), 1,  TimeUnit.HOURS);
-
-                // Return the click count from database
-                return urlMapping.getClickCount();
-            } else {
-                // Handle the case when the shortCode doesn't exist
-                throw new UrlNotFoundException("Short URL not found: " + shortCode);
+        // If not in cache, fetch it from the database (use non-active finder to show historical if needed)
+        Optional<UrlMapping> urlMappingOpt = urlRepo.findByShortCode(shortCode);
+        if (urlMappingOpt.isPresent()) {
+            UrlMapping urlMapping = urlMappingOpt.get();
+            try {
+                String setClickKey = shortCode + ":clickCount";
+                redis.opsForValue().set(setClickKey, String.valueOf(urlMapping.getClickCount()), 1, TimeUnit.HOURS);
+                log.info("CACHE SET key={} ttlSec={}", setClickKey, 3600);
+            } catch (Exception e) {
+                log.warn("CACHE SET error key={} ex={}", shortCode + ":clickCount", e.toString());
             }
+            return urlMapping.getClickCount();
+        } else {
+            throw new UrlNotFoundException("Short URL not found: " + shortCode);
         }
     }
 
-    public Integer getClickCountIfOwner(String shortCode, com.example.urlshortener.model.User user) {
+    public Integer getClickCountIfOwner(String shortCode, User user) {
         Optional<UrlMapping> urlMappingOpt = urlRepo.findByShortCode(shortCode);
-
         if (urlMappingOpt.isPresent()) {
             UrlMapping urlMapping = urlMappingOpt.get();
             if (urlMapping.getUser() != null && urlMapping.getUser().getId().equals(user.getId())) {
-                // Delegate to caching version
                 return getClickCount(shortCode);
             }
         }
         return null;
+    }
+
+    private long cacheTtlSeconds(Instant expiresAt) {
+        if (expiresAt == null) {
+            return DEFAULT_CACHE_TTL_SECONDS;
+        }
+        long secondsLeft = Duration.between(Instant.now(), expiresAt).getSeconds();
+        if (secondsLeft <= 0) {
+            return 0;
+        }
+        return Math.max(1, Math.min(DEFAULT_CACHE_TTL_SECONDS, secondsLeft));
     }
 }

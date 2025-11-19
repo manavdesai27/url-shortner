@@ -21,9 +21,27 @@ public class UrlShortenerController {
     public ResponseEntity<?> shortenUrl(@RequestBody Map<String, String> body,
                                              @AuthenticationPrincipal User user) {
         String originalUrl = body.get("originalUrl");
+
+        // Optional expiration support (seconds from now)
+        Long expiresInSeconds = null;
+        String expiresStr = body.get("expiresInSeconds");
+        if (expiresStr != null && !expiresStr.isBlank()) {
+            try {
+                long val = Long.parseLong(expiresStr);
+                if (val > 0) {
+                    expiresInSeconds = val;
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+
         String shortCode;
         try {
-            shortCode = service.shortenUrl(originalUrl, user);
+            if (expiresInSeconds != null) {
+                shortCode = service.shortenUrl(originalUrl, user, expiresInSeconds);
+            } else {
+                // Backward compatible path
+                shortCode = service.shortenUrl(originalUrl, user);
+            }
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }

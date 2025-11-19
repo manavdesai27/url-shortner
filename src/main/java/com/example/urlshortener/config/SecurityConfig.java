@@ -4,6 +4,7 @@ import com.example.urlshortener.util.JwtUtil;
 import com.example.urlshortener.service.UserService;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -30,6 +31,9 @@ public class SecurityConfig {
     @Autowired
     private UserService userService;
 
+    @Value("${app.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    private String allowedOriginsProp;
+
     @Bean
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -48,16 +52,29 @@ public class SecurityConfig {
         http.addFilterBefore(new JwtAuthFilter(jwtUtil, userService), UsernamePasswordAuthenticationFilter.class);
 
         http
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authz -> authz
-                                .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
-                                .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
-                                .requestMatchers(HttpMethod.POST, "/shorten").authenticated()
-                                .anyRequest()
-                                .authenticated()
-                );
+            .cors(cors -> cors.configurationSource(request -> {
+                var config = new org.springframework.web.cors.CorsConfiguration();
+                var origins = java.util.Arrays.stream(allowedOriginsProp.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .toList();
+                config.setAllowedOriginPatterns(origins);
+                config.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                config.setAllowedHeaders(java.util.List.of("*"));
+                config.setAllowCredentials(true);
+                return config;
+            }))
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authz -> authz
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
+                .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
+                .requestMatchers(HttpMethod.POST, "/shorten").authenticated()
+                .anyRequest()
+                .authenticated()
+            );
 
         return http.build();
     }

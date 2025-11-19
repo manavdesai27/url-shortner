@@ -2,25 +2,31 @@ package com.example.urlshortener.util;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.Date;
 
 @Component
 public class JwtUtil {
-    // Use at least 256 bits (32 chars for HS256)
-    private static final String SECRET = "REPLACE_WITH_A_VERY_SECURE_SECRET_1234567890!@#$";
-    private static final long EXPIRATION_MS = 1000 * 60 * 60 * 24; // 24h
+    @Value("${app.jwt.secret}")
+    private String secret;
 
-    private static final Key KEY = Keys.hmacShaKeyFor(SECRET.getBytes());
+    @Value("${app.jwt.expiration-ms:86400000}")
+    private long expirationMs;
+
+    private Key getKey() {
+        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    }
 
     public String generateToken(String username) {
         return Jwts.builder()
                 .setSubject(username)
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_MS))
-                .signWith(KEY, SignatureAlgorithm.HS256)
+                .setExpiration(new Date(System.currentTimeMillis() + expirationMs))
+                .signWith(getKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
@@ -39,7 +45,7 @@ public class JwtUtil {
 
     private Claims getClaims(String token) {
         return Jwts.parserBuilder()
-                .setSigningKey(KEY)
+                .setSigningKey(getKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();

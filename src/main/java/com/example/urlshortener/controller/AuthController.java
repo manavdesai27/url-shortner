@@ -4,11 +4,18 @@ import com.example.urlshortener.service.UserService;
 import com.example.urlshortener.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Value;
 
+import java.security.Principal;
 import java.util.Map;
+
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 
 @RestController
 @RequestMapping("/auth")
@@ -19,6 +26,12 @@ public class AuthController {
 
     @Autowired
     private JwtUtil jwtUtil;
+
+    @Value("${app.cookie.secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${app.cookie.same-site:Lax}")
+    private String cookieSameSite;
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody Map<String, String> body) {
@@ -47,7 +60,8 @@ public class AuthController {
                     String jwt = jwtUtil.generateToken(user.getUsername());
                     ResponseCookie cookie = ResponseCookie.from("token", jwt)
                             .httpOnly(true)
-                            .sameSite("Strict")
+                            .secure(cookieSecure)
+                            .sameSite(cookieSameSite)
                             .path("/")
                             .maxAge(60 * 60 * 24)
                             .build();
@@ -62,12 +76,47 @@ public class AuthController {
     public ResponseEntity<?> logout() {
         ResponseCookie deleteCookie = ResponseCookie.from("token", "")
                 .httpOnly(true)
-                .sameSite("Strict")
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(0)
                 .build();
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, deleteCookie.toString())
                 .body("Logged out");
+    }
+
+    // @GetMapping("/me")
+    // public ResponseEntity<?> me() {
+    //     var auth = SecurityContextHolder.getContext().getAuthentication();
+    //     if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getName())) {
+    //         return ResponseEntity.status(401).body("Unauthenticated");
+    //     }
+    //     return ResponseEntity.ok(Map.of("username", auth.getName()));
+    // }
+    @GetMapping("/me")
+    public ResponseEntity<?> me() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthenticated"));
+        }
+
+        Object principal = auth.getPrincipal();
+        String username;
+
+        if (principal instanceof UserDetails) {
+            username = ((UserDetails) principal).getUsername();
+        } else if (principal instanceof Principal) {           // java.security.Principal
+            username = ((Principal) principal).getName();
+        } else {
+            // Fallback: if it's your custom user entity, cast and extract the field
+            if (principal instanceof com.example.urlshortener.model.User) {
+                username = ((com.example.urlshortener.model.User) principal).getUsername(); // or getEmail()
+            } else {
+                username = String.valueOf(principal); // fallback to toString()
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("username", username));
     }
 }

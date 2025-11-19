@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
@@ -20,6 +22,8 @@ import java.nio.charset.StandardCharsets;
 
 @Component
 public class RateLimitingFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitingFilter.class);
 
     // ProxyManager<byte[]> is provided via RedisConfig.
     @Autowired
@@ -90,6 +94,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         Bucket bucket = proxyManager.builder().build(bucketKey.getBytes(StandardCharsets.UTF_8), configSupplier);
 
         if (!bucket.tryConsume(1)) {
+            log.warn("RATE_LIMITED method={} path={} clientIp={} bucketKey={}", method, path, clientIp, bucketKey);
             response.setStatus(429);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"error\": \"Too Many Requests. Please slow down.\"}");

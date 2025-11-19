@@ -123,7 +123,89 @@ docker run -d -p 6379:6379 --name redis redis
 
 ---
 
+## 🔍 Observability & Correlated Logging
+
+This project includes end-to-end logging so you can see which request/flow triggered which DB queries and cache lookups. Key pieces:
+
+### 1) Request correlation (MDC)
+- `CorrelationIdFilter` adds these MDC fields to every log:
+  - `requestId` (from `X-Request-ID` header if provided, otherwise a UUID)
+  - `user` (authenticated username if present)
+  - `method`, `path`, `clientIp`
+- Response echoes `X-Request-ID` so you can correlate across services.
+
+Logback pattern (see `src/main/resources/logback-spring.xml`) includes MDC fields:
+```
+%d %-5level [%thread] reqId=%X{requestId} user=%X{user} method=%X{method} path=%X{path} ip=%X{clientIp} %logger - %msg%n
+```
+
+### 2) Request lifecycle logs
+- `RequestLoggingFilter` logs:
+  - `REQ START` with method, path, client IP, user, and requestId.
+  - `REQ END` with HTTP status and duration in ms.
+
+Example:
+```
+INFO  REQ START method=POST path=/shorten clientIp=127.0.0.1 user=john requestId=...
+INFO  REQ END   method=POST path=/shorten status=200 durationMs=23 requestId=...
+```
+
+### 3) Service/repository timing (AOP)
+- `MethodTimingAspect` logs timing for all `service` and `repository` methods:
+```
+INFO  CALL UrlShortenerService.shortenUrl(..) durationMs=5
+INFO  CALL UrlMappingRepository.findActiveByShortCode(..) durationMs=2
+```
+
+### 4) Cache visibility
+- Explicit logging added to `UrlShortenerService` for Redis lookups/sets:
+  - `CACHE GET` + HIT/MISS
+  - `CACHE SET` with TTL
+- Rate limiting responses are logged as `RATE_LIMITED ...` with key details.
+
+### 5) SQL visibility (profile: `debug-sql`)
+- Default: SQL logging off to reduce noise (`spring.jpa.show-sql=false`).
+- Enable detailed SQL + bind parameters:
+  - Activate profile:
+    ```bash
+    ./mvnw spring-boot:run -Dspring-boot.run.profiles=debug-sql
+    # or
+    SPRING_PROFILES_ACTIVE=debug-sql ./mvnw spring-boot:run
+    ```
+  - Config source: `src/main/resources/application-debug-sql.properties`:
+    - `spring.jpa.show-sql=true`
+    - `logging.level.org.hibernate.SQL=DEBUG`
+    - `logging.level.org.hibernate.orm.jdbc.bind=TRACE` (Hibernate 6 bind params)
+
+### 6) Redis wire protocol visibility (profile: `debug-cache`)
+- Enable Redis driver and Spring Data Redis debug:
+  - Activate profile:
+    ```bash
+    ./mvnw spring-boot:run -Dspring-boot.run.profiles=debug-cache
+    # or
+    SPRING_PROFILES_ACTIVE=debug-cache ./mvnw spring-boot:run
+    ```
+  - Config source: `src/main/resources/application-debug-cache.properties`:
+    - `logging.level.org.springframework.data.redis=DEBUG`
+    - `logging.level.io.lettuce.core.protocol=DEBUG`
+- Note: This can be verbose; use in dev/troubleshooting.
+
+### 7) Combine profiles
+You can combine them:
+```bash
+SPRING_PROFILES_ACTIVE=debug-sql,debug-cache ./mvnw spring-boot:run
+```
+
+### 8) Tips
+- Include `X-Request-ID` in your client requests to propagate correlation across components.
+- Tail logs and grep by `reqId` to see the full flow:
+```bash
+# Example if logging to console:
+./mvnw spring-boot:run | grep reqId=YOUR-ID
+```
+
+---
+
 ## 🧑‍💻 Author
 
 Built as a hands-on learning project to strengthen backend system design and real-time performance handling.
-

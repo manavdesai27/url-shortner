@@ -33,3 +33,5 @@ dump.rdb
 
 # VSCode
 .vscode/
+# Local Spring profile file (do not commit)
+src/main/resources/application-local.properties

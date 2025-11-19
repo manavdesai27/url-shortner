@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true">
+<conversionRule conversionWord="clr" converterClass="org.springframework.boot.logging.logback.ColorConverter"/>
+<conversionRule conversionWord="wEx" converterClass="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
+
+    <!-- Console appender with MDC fields for correlation -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%clr(%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}){faint} %clr(%-5level){bold} %clr([%thread]){faint} %clr(reqId=%X{requestId:-N/A}){magenta} %clr(user=%X{user:-anon}){cyan} %clr(method=%X{method:-}){green} %clr(path=%X{path:-}){green} %clr(ip=%X{clientIp:-}){faint} %clr(%logger{36}){blue} - %msg%n%wEx</pattern>
+        </encoder>
+    </appender>
+
+    <!-- SQL and Cache colorized appenders -->
+    <appender name="SQL_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%clr(%d{HH:mm:ss.SSS}){faint} %clr(SQL){bold,cyan} %clr([%thread]){faint} %clr(%logger{0}){cyan} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="CACHE_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%clr(%d{HH:mm:ss.SSS}){faint} %clr(CACHE){bold,yellow} %clr([%thread]){faint} %clr(%logger{0}){yellow} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Keep noisy libs at info by default; use Spring profiles to raise these -->
+    <logger name="org.hibernate.SQL" level="INFO" additivity="false">
+        <appender-ref ref="SQL_CONSOLE"/>
+    </logger>
+    <!-- For Hibernate 6 parameter bindings -->
+    <logger name="org.hibernate.orm.jdbc.bind" level="INFO" additivity="false">
+        <appender-ref ref="SQL_CONSOLE"/>
+    </logger>
+
+    <!-- Redis client libraries -->
+    <logger name="org.springframework.data.redis" level="INFO" additivity="false">
+        <appender-ref ref="CACHE_CONSOLE"/>
+    </logger>
+    <logger name="io.lettuce.core.protocol" level="INFO" additivity="false">
+        <appender-ref ref="CACHE_CONSOLE"/>
+    </logger>
+
+    <!-- Your app -->
+    <logger name="com.example.urlshortener" level="INFO"/>
+
+    <!--
+    Example rolling file appender (optional):
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/app.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} %-5level [%thread] reqId=%X{requestId:-N/A} user=%X{user:-anon} method=%X{method:-} path=%X{path:-} ip=%X{clientIp:-} %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/app.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+    </appender>
+    -->
+</configuration>
