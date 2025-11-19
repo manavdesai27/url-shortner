@@ -1,0 +1,20 @@
+# Exclude build artifacts and VCS
+target
+.git
+.git/*
+.gitignore
+
+# IDE/OS noise
+.idea
+*.iml
+.DS_Store
+*.log
+
+# Maven wrapper not needed in container (we use maven base image)
+.mvn
+mvnw
+mvnw.cmd
+
+# Node-related (none expected here, but safe)
+node_modules
+npm-debug.log
