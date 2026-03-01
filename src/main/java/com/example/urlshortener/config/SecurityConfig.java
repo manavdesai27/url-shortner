@@ -69,6 +69,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
+                .requestMatchers(HttpMethod.GET, "/health", "/health/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
                 .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
                 .requestMatchers(HttpMethod.POST, "/shorten").authenticated()

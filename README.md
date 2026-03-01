@@ -28,6 +28,23 @@ A minimal yet efficient URL shortening service built with **Spring Boot**, **Pos
 
 ## 📦 Endpoints
 
+### Health check
+
+```http
+GET /health
+```
+
+**Response**
+```json
+{
+  "status": "UP"
+}
+```
+
+Notes:
+- Public endpoint (no authentication required)
+- Intended for uptime monitors and platform health checks
+
 ### 1. Create a short URL
 
 ```http
