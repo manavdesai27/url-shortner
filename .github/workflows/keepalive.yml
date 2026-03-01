@@ -12,7 +12,5 @@ jobs:
     steps:
       - name: Ping Upstash Redis
         run: |
-          curl -X POST https://striking-orca-26574.upstash.io \
-          -H "Authorization: Bearer ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}" \
-          -H "Content-Type: application/json" \
-          -d '{"command":["PING"]}'
+          curl -X POST https://striking-orca-26574.upstash.io/ping \
+          -H "Authorization: Bearer ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}"
