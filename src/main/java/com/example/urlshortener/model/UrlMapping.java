@@ -24,7 +24,7 @@ public class UrlMapping {
     @SequenceGenerator(name = "url_mapping_seq", sequenceName = "url_mapping_seq", allocationSize = 50)
     private Long id;
 
-    @Column(name = "short_code", unique = true)
+    @Column(name = "short_code", unique = true, length = 7)
     private String shortCode;
 
     @Column(name = "original_url", nullable = false)
@@ -61,7 +61,7 @@ public class UrlMapping {
     @PrePersist
     private void prePersist() {
         if (this.shortCode == null && this.id != null) {
-            this.shortCode = com.example.urlshortener.util.Base62Encoder.encode(this.id);
+            this.shortCode = com.example.urlshortener.util.Base62Encoder.encodeFixed(this.id);
         }
     }
 
