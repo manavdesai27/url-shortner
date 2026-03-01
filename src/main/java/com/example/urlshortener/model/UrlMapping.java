@@ -13,7 +13,8 @@ import java.time.Instant;
         },
         indexes = {
                 @Index(name = "idx_short_code", columnList = "short_code"),
-                @Index(name = "idx_expires_at", columnList = "expires_at")
+                @Index(name = "idx_expires_at", columnList = "expires_at"),
+                @Index(name = "idx_user_created_at", columnList = "user_id, created_at")
         }
 )
 public class UrlMapping {

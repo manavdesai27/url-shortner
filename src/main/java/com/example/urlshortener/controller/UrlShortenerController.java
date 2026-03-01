@@ -5,6 +5,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.data.domain.Sort;
+import com.example.urlshortener.repository.UrlMappingSummary;
 
 import java.util.Map;
 import com.example.urlshortener.model.User;
@@ -75,5 +80,15 @@ public class UrlShortenerController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    @GetMapping("/links")
+    public ResponseEntity<?> getMyLinks(
+            @AuthenticationPrincipal User user,
+            @RequestParam(name = "includeExpired", defaultValue = "false") boolean includeExpired,
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        Page<UrlMappingSummary> page = service.listMyLinks(user, includeExpired, pageable);
+        return ResponseEntity.ok(page);
     }
 }
