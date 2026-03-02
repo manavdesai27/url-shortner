@@ -24,7 +24,7 @@ public class UrlMapping {
     @SequenceGenerator(name = "url_mapping_seq", sequenceName = "url_mapping_seq", allocationSize = 50)
     private Long id;
 
-    @Column(name = "short_code", unique = true, length = 7)
+    @Column(name = "short_code", unique = true, length = 32)
     private String shortCode;
 
     @Column(name = "original_url", nullable = false)

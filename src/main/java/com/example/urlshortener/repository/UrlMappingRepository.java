@@ -13,6 +13,7 @@ import java.util.Optional;
 
 public interface UrlMappingRepository extends JpaRepository<UrlMapping, Long> {
     Optional<UrlMapping> findByShortCode(String shortCode);
+    boolean existsByShortCode(String shortCode);
     Optional<UrlMapping> findByOriginalUrlAndUser(String originalUrl, User user);
 
     @Query("select u from UrlMapping u where u.shortCode = :shortCode and (u.expiresAt is null or u.expiresAt > CURRENT_TIMESTAMP)")

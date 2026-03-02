@@ -10,6 +10,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.data.domain.Sort;
 import com.example.urlshortener.repository.UrlMappingSummary;
+import com.example.urlshortener.dto.ShortenRequest;
+import com.example.urlshortener.exception.InvalidShortCodeException;
+import com.example.urlshortener.exception.InvalidUrlException;
+import com.example.urlshortener.exception.ShortCodeConflictException;
 
 import java.util.Map;
 import com.example.urlshortener.model.User;
@@ -23,32 +27,33 @@ public class UrlShortenerController {
     private UrlShortenerService service;
 
     @PostMapping("/shorten")
-    public ResponseEntity<?> shortenUrl(@RequestBody Map<String, String> body,
+    public ResponseEntity<?> shortenUrl(@RequestBody ShortenRequest req,
                                              @AuthenticationPrincipal User user) {
-        String originalUrl = body.get("originalUrl");
+        String originalUrl = req.getOriginalUrl();
 
         // Optional expiration support (seconds from now)
-        Long expiresInSeconds = null;
-        String expiresStr = body.get("expiresInSeconds");
-        if (expiresStr != null && !expiresStr.isBlank()) {
-            try {
-                long val = Long.parseLong(expiresStr);
-                if (val > 0) {
-                    expiresInSeconds = val;
-                }
-            } catch (NumberFormatException ignored) {}
+        Long expiresInSeconds = req.getExpiresInSeconds();
+        if (expiresInSeconds != null && expiresInSeconds <= 0) {
+            expiresInSeconds = null;
         }
 
+        String custom = req.getCustomShortCode();
         String shortCode;
         try {
-            if (expiresInSeconds != null) {
+            if (custom != null && !custom.isBlank()) {
+                shortCode = service.shortenUrlWithAlias(originalUrl, user, expiresInSeconds, custom);
+            } else if (expiresInSeconds != null) {
                 shortCode = service.shortenUrl(originalUrl, user, expiresInSeconds);
             } else {
                 // Backward compatible path
                 shortCode = service.shortenUrl(originalUrl, user);
             }
-        } catch (Exception e) {
+        } catch (InvalidShortCodeException | InvalidUrlException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (ShortCodeConflictException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
         return ResponseEntity.ok(Map.of("shortCode", shortCode, "originalUrl", originalUrl));
     }

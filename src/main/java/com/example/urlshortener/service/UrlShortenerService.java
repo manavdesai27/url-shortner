@@ -2,6 +2,9 @@ package com.example.urlshortener.service;
 
 import com.example.urlshortener.exception.InvalidUrlException;
 import com.example.urlshortener.exception.UrlNotFoundException;
+import com.example.urlshortener.exception.InvalidShortCodeException;
+import com.example.urlshortener.exception.ShortCodeConflictException;
+import com.example.urlshortener.util.ShortCodePolicy;
 import com.example.urlshortener.model.UrlMapping;
 import com.example.urlshortener.model.User;
 import com.example.urlshortener.repository.UrlMappingRepository;
@@ -33,6 +36,9 @@ public class UrlShortenerService {
 
     @Autowired
     private StringRedisTemplate redis;
+
+    @Autowired
+    private ShortCodePolicy shortCodePolicy;
 
     // Backward-compatible entrypoint (no expiration)
     public String shortenUrl(String originalUrl, User user) {
@@ -105,6 +111,74 @@ public class UrlShortenerService {
             long ttl = cacheTtlSeconds(mapping.getExpiresAt());
             if (ttl > 0) {
                 redis.opsForValue().set(mapping.getShortCode(), mapping.getOriginalUrl(), ttl, TimeUnit.SECONDS);
+                redis.opsForValue().set(cacheKey, mapping.getShortCode(), ttl, TimeUnit.SECONDS);
+            }
+        } catch (Exception ignored) {}
+
+        return mapping.getShortCode();
+    }
+
+    public String shortenUrlWithAlias(String originalUrl, User user, Long expiresInSeconds, String customShortCode) {
+        if (originalUrl == null || originalUrl.isBlank()) {
+            throw new InvalidUrlException("URL cannot be empty");
+        }
+        if (!isValidUrl(originalUrl)) {
+            throw new InvalidUrlException("Invalid URL format");
+        }
+
+        // Dedup: if user already has an active mapping for this URL, return it (keeps existing behavior)
+        Optional<UrlMapping> existing = urlRepo.findActiveByOriginalUrlAndUser(originalUrl, user);
+        if (existing.isPresent() && existing.get().getShortCode() != null) {
+            return existing.get().getShortCode();
+        }
+
+        // Validate alias
+        if (customShortCode == null || customShortCode.isBlank()) {
+            // Fallback to auto generation if alias not provided
+            return shortenUrl(originalUrl, user, expiresInSeconds);
+        }
+        String alias = shortCodePolicy.normalize(customShortCode);
+        try {
+            shortCodePolicy.validateOrThrow(alias);
+        } catch (IllegalArgumentException ex) {
+            throw new InvalidShortCodeException(ex.getMessage(), ex);
+        }
+        if (shortCodePolicy.isReserved(alias)) {
+            throw new InvalidShortCodeException("Alias is reserved");
+        }
+        if (urlRepo.existsByShortCode(alias)) {
+            throw new ShortCodeConflictException("Alias already taken");
+        }
+
+        // Create mapping with explicit alias
+        UrlMapping mapping = new UrlMapping();
+        mapping.setOriginalUrl(originalUrl);
+        mapping.setUser(user);
+        mapping.setShortCode(alias);
+        if (expiresInSeconds != null && expiresInSeconds > 0) {
+            mapping.setExpiresAt(Instant.now().plusSeconds(expiresInSeconds));
+        }
+
+        try {
+            mapping = urlRepo.save(mapping);
+        } catch (DataIntegrityViolationException ex) {
+            // Could be alias taken (race) or user-url dedup race; map accordingly
+            if (urlRepo.existsByShortCode(alias)) {
+                throw new ShortCodeConflictException("Alias already taken", ex);
+            }
+            Optional<UrlMapping> race = urlRepo.findActiveByOriginalUrlAndUser(originalUrl, user);
+            if (race.isPresent()) {
+                return race.get().getShortCode();
+            }
+            throw ex;
+        }
+
+        // Cache both lookup and reverse for future (TTL aligned to expiration)
+        try {
+            long ttl = cacheTtlSeconds(mapping.getExpiresAt());
+            if (ttl > 0) {
+                redis.opsForValue().set(mapping.getShortCode(), mapping.getOriginalUrl(), ttl, TimeUnit.SECONDS);
+                String cacheKey = String.format("url:%d:%s", user.getId(), originalUrl);
                 redis.opsForValue().set(cacheKey, mapping.getShortCode(), ttl, TimeUnit.SECONDS);
             }
         } catch (Exception ignored) {}
