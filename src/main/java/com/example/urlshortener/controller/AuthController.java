@@ -4,6 +4,12 @@ import com.example.urlshortener.service.UserService;
 import com.example.urlshortener.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
+import jakarta.validation.Valid;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import jakarta.servlet.http.HttpServletRequest;
+import com.example.urlshortener.dto.LoginRequest;
+import com.example.urlshortener.dto.RegisterRequest;
+import java.util.concurrent.TimeUnit;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -33,10 +39,16 @@ public class AuthController {
     @Value("${app.cookie.same-site:Lax}")
     private String cookieSameSite;
 
+    @Value("${app.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    private String allowedOriginsProp;
+
+    @Autowired
+    private StringRedisTemplate redis;
+
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
-        String password = body.get("password");
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest body) {
+        String username = body.getUsername() != null ? body.getUsername().trim() : null;
+        String password = body.getPassword();
         if (username == null || password == null) {
             return ResponseEntity.badRequest().body("Username and password required.");
         }
@@ -49,23 +61,27 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
-        String password = body.get("password");
-        if (username == null || password == null) {
-            return ResponseEntity.badRequest().body("Username and password required.");
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest body, HttpServletRequest request) {
+        if (!isTrustedOrigin(request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Untrusted origin"));
         }
+        String username = body.getUsername();
+        String password = body.getPassword();
         return userService.authenticate(username, password)
                 .map(user -> {
                     String accessToken = jwtUtil.generateAccessToken(user.getUsername());
                     String refreshToken = jwtUtil.generateRefreshToken(user.getUsername());
-                    // __Host- cookie: Secure + Path=/ + no Domain
+                    String jti = jwtUtil.extractJti(refreshToken);
+                    long ttlSec = Math.max(1L, (jwtUtil.extractExpiration(refreshToken).getTime() - System.currentTimeMillis()) / 1000L);
+                    try {
+                        redis.opsForValue().set("rt:" + user.getUsername(), jti, ttlSec, TimeUnit.SECONDS);
+                    } catch (Exception ignored) {}
                     ResponseCookie cookie = ResponseCookie.from("__Host-refresh", refreshToken)
                             .httpOnly(true)
                             .secure(cookieSecure)
                             .sameSite(cookieSameSite)
                             .path("/")
-                            .maxAge(60L * 60L * 24L * 14L)
+                            .maxAge(ttlSec)
                             .build();
                     return ResponseEntity.ok()
                             .header(HttpHeaders.SET_COOKIE, cookie.toString())
@@ -75,7 +91,18 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout() {
+    public ResponseEntity<?> logout(@CookieValue(name="__Host-refresh", required=false) String refreshToken,
+                                    HttpServletRequest request) {
+        if (!isTrustedOrigin(request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Untrusted origin"));
+        }
+        try {
+            if (refreshToken != null && jwtUtil.validateRefreshToken(refreshToken)) {
+                String username = jwtUtil.extractUsername(refreshToken);
+                redis.delete("rt:" + username);
+            }
+        } catch (Exception ignored) {}
+
         ResponseCookie deleteCookie = ResponseCookie.from("__Host-refresh", "")
                 .httpOnly(true)
                 .secure(cookieSecure)
@@ -88,29 +115,43 @@ public class AuthController {
                 .body("Logged out");
     }
 
-    // @GetMapping("/me")
-    // public ResponseEntity<?> me() {
-    //     var auth = SecurityContextHolder.getContext().getAuthentication();
-    //     if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getName())) {
-    //         return ResponseEntity.status(401).body("Unauthenticated");
-    //     }
-    //     return ResponseEntity.ok(Map.of("username", auth.getName()));
-    // }
     @PostMapping("/refresh")
-    public ResponseEntity<?> refresh(@CookieValue(name="__Host-refresh", required=false) String refreshToken) {
+    public ResponseEntity<?> refresh(@CookieValue(name="__Host-refresh", required=false) String refreshToken,
+                                     HttpServletRequest request) {
+        if (!isTrustedOrigin(request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Untrusted origin"));
+        }
         if (refreshToken == null || !jwtUtil.validateRefreshToken(refreshToken)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid refresh token"));
         }
         String username = jwtUtil.extractUsername(refreshToken);
+        String jti = jwtUtil.extractJti(refreshToken);
+        String key = "rt:" + username;
+        String stored = null;
+        try {
+            stored = redis.opsForValue().get(key);
+        } catch (Exception ignored) {}
+
+        if (stored == null || !stored.equals(jti)) {
+            try { redis.delete(key); } catch (Exception ignored) {}
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid refresh token"));
+        }
+
         String newAccess = jwtUtil.generateAccessToken(username);
         String newRefresh = jwtUtil.generateRefreshToken(username);
+        String newJti = jwtUtil.extractJti(newRefresh);
+        long ttlSec = Math.max(1L, (jwtUtil.extractExpiration(newRefresh).getTime() - System.currentTimeMillis()) / 1000L);
+
+        try {
+            redis.opsForValue().set(key, newJti, ttlSec, TimeUnit.SECONDS);
+        } catch (Exception ignored) {}
 
         ResponseCookie cookie = ResponseCookie.from("__Host-refresh", newRefresh)
                 .httpOnly(true)
                 .secure(cookieSecure)
                 .sameSite(cookieSameSite)
                 .path("/")
-                .maxAge(60L * 60L * 24L * 14L)
+                .maxAge(ttlSec)
                 .build();
 
         return ResponseEntity.ok()
@@ -133,14 +174,37 @@ public class AuthController {
         } else if (principal instanceof Principal) {           // java.security.Principal
             username = ((Principal) principal).getName();
         } else {
-            // Fallback: if it's your custom user entity, cast and extract the field
             if (principal instanceof com.example.urlshortener.model.User) {
-                username = ((com.example.urlshortener.model.User) principal).getUsername(); // or getEmail()
+                username = ((com.example.urlshortener.model.User) principal).getUsername();
             } else {
-                username = String.valueOf(principal); // fallback to toString()
+                username = String.valueOf(principal);
             }
         }
 
         return ResponseEntity.ok(Map.of("username", username));
+    }
+
+    private boolean isTrustedOrigin(HttpServletRequest request) {
+        try {
+            String origin = request.getHeader("Origin");
+            String referer = request.getHeader("Referer");
+            var allowed = java.util.Arrays.stream(allowedOriginsProp.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+            if (origin != null && !origin.isBlank()) {
+                return allowed.contains(origin);
+            }
+            if (referer != null && !referer.isBlank()) {
+                for (String a : allowed) {
+                    if (!a.isEmpty() && referer.startsWith(a)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        } catch (Exception ignored) {}
+        // If no headers, treat as trusted (e.g., same-origin or non-browser clients)
+        return true;
     }
 }

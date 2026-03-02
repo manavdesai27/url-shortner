@@ -18,6 +18,10 @@ WORKDIR /app
 # Copy built JAR from build stage
 COPY --from=build /app/target/*.jar /app/app.jar
 
+# Create non-root user and set ownership
+RUN useradd -r -u 10001 appuser && chown -R appuser:appuser /app
+USER 10001
+
 # Allow overriding JVM options and port at runtime (Render sets PORT)
 ENV JAVA_OPTS=""
 EXPOSE 8080

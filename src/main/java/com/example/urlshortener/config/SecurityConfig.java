@@ -11,6 +11,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -22,21 +25,13 @@ import java.io.IOException;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
-    @Autowired
-    private JwtUtil jwtUtil;
-
-    @Autowired
-    private UserService userService;
 
     @Value("${app.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
     private String allowedOriginsProp;
 
-    @Bean
-    public BCryptPasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
 
     @Bean
     public FilterRegistrationBean<RateLimitingFilter> rateLimitingFilterRegistration(RateLimitingFilter filter) {
@@ -46,9 +41,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public JwtAuthFilter jwtAuthFilter(JwtUtil jwtUtil, UserService userService) {
+        return new JwtAuthFilter(jwtUtil, userService);
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter) throws Exception {
         // Custom JWT filter
-        http.addFilterBefore(new JwtAuthFilter(jwtUtil, userService), UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         http
             .cors(cors -> cors.configurationSource(request -> {
@@ -57,13 +57,18 @@ public class SecurityConfig {
                         .map(String::trim)
                         .filter(s -> !s.isEmpty())
                         .toList();
-                config.setAllowedOriginPatterns(origins);
+                config.setAllowedOrigins(origins);
                 config.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
                 config.setAllowedHeaders(java.util.List.of("*"));
                 config.setAllowCredentials(true);
                 return config;
             }))
             .csrf(csrf -> csrf.disable())
+            .headers(headers -> {
+                headers.frameOptions(frame -> frame.deny());
+                headers.referrerPolicy(r -> r.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN));
+                headers.contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; frame-ancestors 'none';"));
+            })
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
@@ -102,8 +107,8 @@ public class SecurityConfig {
             if (token != null && jwtUtil.validateAccessToken(token)) {
                 String username = jwtUtil.extractUsername(token);
                 userService.findByUsername(username).ifPresent(user -> {
-                    var auth = new UsernamePasswordAuthenticationToken(
-                            user, null, null); // No roles/authorities
+                    var authorities = java.util.List.of(new SimpleGrantedAuthority("ROLE_USER"));
+                    var auth = new UsernamePasswordAuthenticationToken(user, null, authorities);
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 });
             }

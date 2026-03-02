@@ -16,6 +16,7 @@ import com.example.urlshortener.exception.InvalidUrlException;
 import com.example.urlshortener.exception.ShortCodeConflictException;
 
 import java.util.Map;
+import jakarta.validation.Valid;
 import com.example.urlshortener.model.User;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
@@ -27,7 +28,7 @@ public class UrlShortenerController {
     private UrlShortenerService service;
 
     @PostMapping("/shorten")
-    public ResponseEntity<?> shortenUrl(@RequestBody ShortenRequest req,
+    public ResponseEntity<?> shortenUrl(@Valid @RequestBody ShortenRequest req,
                                              @AuthenticationPrincipal User user) {
         String originalUrl = req.getOriginalUrl();
 
@@ -53,7 +54,7 @@ public class UrlShortenerController {
         } catch (ShortCodeConflictException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Internal server error"));
         }
         return ResponseEntity.ok(Map.of("shortCode", shortCode, "originalUrl", originalUrl));
     }
@@ -67,7 +68,7 @@ public class UrlShortenerController {
                     .build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", "Not found"));
         }
     }
 
@@ -83,7 +84,7 @@ public class UrlShortenerController {
                         .body(Map.of("error", "Short URL not found or not yours"));
             }
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Internal server error"));
         }
     }
 

@@ -94,8 +94,17 @@ public class JwtUtil {
     private Claims getClaims(String token) {
         return Jwts.parserBuilder()
                 .setSigningKey(getKey())
+                .setAllowedClockSkewSeconds(60)
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
+    }
+
+    public String extractJti(String token) {
+        return getClaims(token).getId();
+    }
+
+    public Date extractExpiration(String token) {
+        return getClaims(token).getExpiration();
     }
 }

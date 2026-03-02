@@ -46,6 +46,21 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             .refillIntervally(100, Duration.ofMinutes(1))
             .build();
 
+    private final Bandwidth refreshLimit = Bandwidth.builder()
+            .capacity(30)
+            .refillIntervally(30, Duration.ofMinutes(1))
+            .build();
+
+    private final Bandwidth analyticsLimit = Bandwidth.builder()
+            .capacity(60)
+            .refillIntervally(60, Duration.ofMinutes(1))
+            .build();
+
+    private final Bandwidth linksLimit = Bandwidth.builder()
+            .capacity(60)
+            .refillIntervally(60, Duration.ofMinutes(1))
+            .build();
+
     // ProxyManager<byte[]> is injected and provided by configuration; no manual setup or cleanup needed.
 
     @Override
@@ -56,7 +71,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         return !(
             ("/auth/login".equals(path) && "POST".equals(method)) ||
             ("/auth/register".equals(path) && "POST".equals(method)) ||
+            ("/auth/refresh".equals(path) && "POST".equals(method)) ||
             ("/shorten".equals(path) && "POST".equals(method)) ||
+            (path.matches("^/analytics/[A-Za-z0-9_-]{2,32}$") && "GET".equals(method)) ||
+            ("/links".equals(path) && "GET".equals(method)) ||
             (path.matches("^/[a-zA-Z0-9]+$") && "GET".equals(method))
         );
     }
@@ -86,6 +104,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         } else if (path.matches("^/[a-zA-Z0-9]+$") && "GET".equals(method)) {
             bucketKey = "REDIRECT:" + clientIp;
             configSupplier = () -> io.github.bucket4j.BucketConfiguration.builder().addLimit(redirectLimit).build();
+        } else if ("/auth/refresh".equals(path) && "POST".equals(method)) {
+            bucketKey = "REFRESH:" + clientIp;
+            configSupplier = () -> io.github.bucket4j.BucketConfiguration.builder().addLimit(refreshLimit).build();
+        } else if (path.matches("^/analytics/[A-Za-z0-9_-]{2,32}$") && "GET".equals(method)) {
+            bucketKey = "ANALYTICS:" + clientIp;
+            configSupplier = () -> io.github.bucket4j.BucketConfiguration.builder().addLimit(analyticsLimit).build();
+        } else if ("/links".equals(path) && "GET".equals(method)) {
+            bucketKey = "LINKS:" + clientIp;
+            configSupplier = () -> io.github.bucket4j.BucketConfiguration.builder().addLimit(linksLimit).build();
         } else {
             filterChain.doFilter(request, response);
             return;
