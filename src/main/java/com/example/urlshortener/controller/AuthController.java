@@ -57,24 +57,26 @@ public class AuthController {
         }
         return userService.authenticate(username, password)
                 .map(user -> {
-                    String jwt = jwtUtil.generateToken(user.getUsername());
-                    ResponseCookie cookie = ResponseCookie.from("token", jwt)
+                    String accessToken = jwtUtil.generateAccessToken(user.getUsername());
+                    String refreshToken = jwtUtil.generateRefreshToken(user.getUsername());
+                    // __Host- cookie: Secure + Path=/ + no Domain
+                    ResponseCookie cookie = ResponseCookie.from("__Host-refresh", refreshToken)
                             .httpOnly(true)
                             .secure(cookieSecure)
                             .sameSite(cookieSameSite)
                             .path("/")
-                            .maxAge(60 * 60 * 24)
+                            .maxAge(60L * 60L * 24L * 14L)
                             .build();
                     return ResponseEntity.ok()
                             .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                            .body("Login successful");
+                            .body(Map.of("accessToken", accessToken, "username", user.getUsername()));
                 })
-                .orElse(ResponseEntity.status(401).body("Invalid username or password"));
+                .orElse(ResponseEntity.status(401).body(Map.of("error", "Invalid username or password")));
     }
 
     @PostMapping("/logout")
     public ResponseEntity<?> logout() {
-        ResponseCookie deleteCookie = ResponseCookie.from("token", "")
+        ResponseCookie deleteCookie = ResponseCookie.from("__Host-refresh", "")
                 .httpOnly(true)
                 .secure(cookieSecure)
                 .sameSite(cookieSameSite)
@@ -94,6 +96,28 @@ public class AuthController {
     //     }
     //     return ResponseEntity.ok(Map.of("username", auth.getName()));
     // }
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(@CookieValue(name="__Host-refresh", required=false) String refreshToken) {
+        if (refreshToken == null || !jwtUtil.validateRefreshToken(refreshToken)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid refresh token"));
+        }
+        String username = jwtUtil.extractUsername(refreshToken);
+        String newAccess = jwtUtil.generateAccessToken(username);
+        String newRefresh = jwtUtil.generateRefreshToken(username);
+
+        ResponseCookie cookie = ResponseCookie.from("__Host-refresh", newRefresh)
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(60L * 60L * 24L * 14L)
+                .build();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(Map.of("accessToken", newAccess));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<?> me() {
         var auth = SecurityContextHolder.getContext().getAuthentication();

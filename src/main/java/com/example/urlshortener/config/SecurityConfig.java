@@ -17,7 +17,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import jakarta.servlet.*;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 
@@ -69,6 +68,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
+                .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
                 .requestMatchers(HttpMethod.GET, "/health", "/health/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/{shortCode}").permitAll()
                 .requestMatchers(HttpMethod.GET, "/analytics/{shortCode}").authenticated()
@@ -94,16 +94,12 @@ public class SecurityConfig {
         public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain)
                 throws IOException, ServletException {
             HttpServletRequest request = (HttpServletRequest) servletRequest;
+            String authHeader = request.getHeader("Authorization");
             String token = null;
-            if (request.getCookies() != null) {
-                for (Cookie cookie : request.getCookies()) {
-                    if ("token".equals(cookie.getName())) {
-                        token = cookie.getValue();
-                        break;
-                    }
-                }
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                token = authHeader.substring(7);
             }
-            if (token != null && jwtUtil.validateToken(token)) {
+            if (token != null && jwtUtil.validateAccessToken(token)) {
                 String username = jwtUtil.extractUsername(token);
                 userService.findByUsername(username).ifPresent(user -> {
                     var auth = new UsernamePasswordAuthenticationToken(
