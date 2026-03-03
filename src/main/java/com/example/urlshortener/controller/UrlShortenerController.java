@@ -1,7 +1,9 @@
 package com.example.urlshortener.controller;
 
 import com.example.urlshortener.service.UrlShortenerService;
+import com.example.urlshortener.service.RuleEvaluatorService;
 import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +28,9 @@ public class UrlShortenerController {
 
     @Autowired
     private UrlShortenerService service;
+
+    @Autowired
+    private RuleEvaluatorService ruleEvaluatorService;
 
     @PostMapping("/shorten")
     public ResponseEntity<?> shortenUrl(@Valid @RequestBody ShortenRequest req,
@@ -60,11 +65,12 @@ public class UrlShortenerController {
     }
 
     @GetMapping("/{shortCode}")
-    public ResponseEntity<?> redirectToOriginal(@PathVariable String shortCode) {
+    public ResponseEntity<?> redirectToOriginal(@PathVariable String shortCode, HttpServletRequest request) {
         try {
             String originalUrl = service.getOriginalUrl(shortCode);
+            String destination = ruleEvaluatorService.evaluateDestination(shortCode, originalUrl, request);
             return ResponseEntity.status(302)
-                    .header("Location", originalUrl)
+                    .header("Location", destination)
                     .build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
