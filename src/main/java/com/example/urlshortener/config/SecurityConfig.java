@@ -21,7 +21,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 
 @Configuration
 @EnableWebSecurity
@@ -86,7 +89,7 @@ public class SecurityConfig {
     }
 
     // JWT extraction and Spring Security context update
-    public static class JwtAuthFilter implements jakarta.servlet.Filter {
+    public static class JwtAuthFilter extends OncePerRequestFilter {
         private final JwtUtil jwtUtil;
         private final UserService userService;
 
@@ -96,9 +99,19 @@ public class SecurityConfig {
         }
 
         @Override
-        public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain)
+        protected boolean shouldNotFilterAsyncDispatch() { return true; }
+
+        @Override
+        protected boolean shouldNotFilterErrorDispatch() { return true; }
+
+        @Override
+        protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
                 throws IOException, ServletException {
-            HttpServletRequest request = (HttpServletRequest) servletRequest;
+            var existing = SecurityContextHolder.getContext().getAuthentication();
+            if (existing != null && existing.isAuthenticated() && !(existing instanceof AnonymousAuthenticationToken)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
             String authHeader = request.getHeader("Authorization");
             String token = null;
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -112,7 +125,7 @@ public class SecurityConfig {
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 });
             }
-            filterChain.doFilter(servletRequest, servletResponse);
+            filterChain.doFilter(request, response);
         }
     }
 }

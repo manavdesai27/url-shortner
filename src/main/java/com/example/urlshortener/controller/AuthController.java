@@ -156,7 +156,7 @@ public class AuthController {
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(Map.of("accessToken", newAccess));
+                .body(Map.of("accessToken", newAccess, "username", username));
     }
 
     @GetMapping("/me")
